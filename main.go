@@ -5,16 +5,27 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"io"
 	"log"
 	"os"
+	"io/ioutil"
 	"strings"
 	"time"
+
 	"github.com/aws/aws-sdk-go/aws/credentials"
+)
+
+var (
+	forcePathStyle bool = true
+	profile string = "default"
+)
+
+const (
+	numArgs = 5
 )
 
 type Obj struct {
@@ -22,18 +33,31 @@ type Obj struct {
 	key    string
 }
 
+func init(){
+	flag.BoolVar(&forcePathStyle, "forcepathstyle", forcePathStyle, "disable S3 path style")
+	flag.StringVar(&profile, "profile", profile, "AWS config file profile")
+	flag.Parse()
+	if flag.NArg() < numArgs {
+		fmt.Fprintln(os.Stderr, "invalid number of args")
+	}
+}
+
 func main() {
-	endpoint1 := os.Args[1]
-	endpoint2 := os.Args[2]
-	fileName1 := os.Args[3]
-	fileName2 := os.Args[4]
-	outFileName := os.Args[5]
+	endpoint1 := flag.Arg(0)
+	endpoint2 := flag.Arg(1)
+	fileName1 := flag.Arg(2)
+	fileName2 := flag.Arg(3)
+	outFileName := flag.Arg(4)
+
+	retries := 0
 
 	fmt.Printf("Hello World!\n")
 	sess1, err := session.NewSession(&aws.Config{
 		Region:   aws.String("us-east-1"),
 		Endpoint: &endpoint1,
-		Credentials: credentials.NewSharedCredentials("", "default"),
+		S3ForcePathStyle: &forcePathStyle,
+		MaxRetries: &retries,
+		Credentials: credentials.NewSharedCredentials("", profile),
 	})
 
 	if err != nil {
@@ -42,6 +66,9 @@ func main() {
 	sess2, err := session.NewSession(&aws.Config{
 		Region:   aws.String("us-east-1"),
 		Endpoint: &endpoint2,
+		MaxRetries: &retries,
+		S3ForcePathStyle: &forcePathStyle,
+		Credentials: credentials.NewSharedCredentials("", profile),
 	})
 
 	if err != nil {
@@ -65,7 +92,7 @@ func main() {
 	defer file2.Close()
 	site2Objs := readObjs(file2)
 
-	outFile, err := os.OpenFile(outFileName, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0444)
+	outFile, err := os.OpenFile(outFileName, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0666)
 	if err != nil {
 		panic(fmt.Sprintf("Could not open file %s: %s", outFileName, err))
 	}
@@ -98,7 +125,6 @@ func main() {
 
 func getObjects(con *s3.S3, objs []Obj, c chan int) {
 	good := 0
-	buffer := make([]byte, 128*1024)
 	for _, o := range objs {
 		out, err := con.GetObject(&s3.GetObjectInput{Bucket: &o.bucket, Key: &o.key})
 		if err != nil {
@@ -106,17 +132,9 @@ func getObjects(con *s3.S3, objs []Obj, c chan int) {
 			continue
 		}
 		// Read data and discard
-		b := out.Body
-		for {
-			_, err := b.Read(buffer)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				panic(err)
-			}
+		if _, err := ioutil.ReadAll(out.Body); err != nil {
+						fmt.Fprintln(os.Stderr, "error reading body:", err)
 		}
-		b.Close()
 		good++
 	}
 
