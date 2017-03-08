@@ -133,7 +133,7 @@ func getObjects(con *s3.S3, objs []Obj, c chan int) {
 		}
 		// Read data and discard
 		if _, err := ioutil.ReadAll(out.Body); err != nil {
-						fmt.Fprintln(os.Stderr, "error reading body:", err)
+			fmt.Fprintln(os.Stderr, "error reading body:", err)
 		}
 		good++
 	}
